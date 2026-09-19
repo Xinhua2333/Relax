@@ -7,19 +7,21 @@ from typing import Any
 import numpy as np
 import torch
 
-
-_SPEC_TOKEN_COUNT_KEYS = (
-    ("spec_num_correct_drafts", "spec_num_proposed_drafts"),
-    ("spec_accepted_drafts", "spec_proposed_drafts"),
-    ("spec_accept_token_num", "spec_draft_token_num"),
+from relax.utils.speculative import (
+    SPEC_TOKEN_COUNT_KEYS,
+    SpeculativeCounts,
 )
+
+
+_SPEC_TOKEN_COUNT_KEYS = SPEC_TOKEN_COUNT_KEYS
 
 
 def get_spec_token_counts(meta_info: dict[str, Any]) -> tuple[int, int]:
     """Extract speculative decoding counts across SGLang metadata versions."""
     for accept_key, draft_key in _SPEC_TOKEN_COUNT_KEYS:
         if accept_key in meta_info and draft_key in meta_info:
-            return int(meta_info.get(accept_key, 0) or 0), int(meta_info.get(draft_key, 0) or 0)
+            counts = SpeculativeCounts.from_meta_info(meta_info)
+            return counts.accepted or 0, counts.proposed or 0
     return 0, 0
 
 
@@ -98,6 +100,9 @@ class Sample:
         spec_verify_ct: int = 0
         completion_token_num: int = 0
 
+        counts: SpeculativeCounts | None = None
+        legacy_counts: bool = False
+
         @property
         def spec_accept_rate(self) -> float:
             return self.spec_accept_token_num / self.spec_draft_token_num if self.spec_draft_token_num > 0 else 0.0
@@ -107,11 +112,26 @@ class Sample:
             return self.completion_token_num / self.spec_verify_ct if self.spec_verify_ct > 0 else 0.0
 
         def add(self, meta_info: dict):
+            counts = SpeculativeCounts.from_meta_info(meta_info)
+
+            if self.counts is None and any(
+                (
+                    self.spec_accept_token_num,
+                    self.spec_draft_token_num,
+                    self.spec_verify_ct,
+                    self.completion_token_num,
+                )
+            ):
+                self.legacy_counts = True
+
+            if not self.legacy_counts:
+                self.counts = counts if self.counts is None else self.counts.plus(counts)
+
             spec_accept_token_num, spec_draft_token_num = get_spec_token_counts(meta_info)
             self.spec_accept_token_num += spec_accept_token_num
             self.spec_draft_token_num += spec_draft_token_num
-            self.spec_verify_ct += meta_info.get("spec_verify_ct", 0)
-            self.completion_token_num += meta_info.get("completion_tokens", 0)
+            self.spec_verify_ct += counts.verify or 0
+            self.completion_token_num += counts.completion or 0
 
         def to_dict(self):
             return {
@@ -119,15 +139,31 @@ class Sample:
                 "spec_draft_token_num": self.spec_draft_token_num,
                 "spec_verify_ct": self.spec_verify_ct,
                 "completion_token_num": self.completion_token_num,
+                "counts": self.counts.to_dict() if self.counts is not None else None,
+                "legacy_counts": self.legacy_counts,
             }
 
         @staticmethod
         def from_dict(data: dict):
+            data = data or {}
             info = Sample.SpecInfo()
-            info.spec_accept_token_num = data.get("spec_accept_token_num", 0)
-            info.spec_draft_token_num = data.get("spec_draft_token_num", 0)
-            info.spec_verify_ct = data.get("spec_verify_ct", 0)
-            info.completion_token_num = data.get("completion_token_num", 0)
+
+            legacy = SpeculativeCounts.from_meta_info(
+                {
+                    **data,
+                    "completion_tokens": data.get("completion_token_num"),
+                }
+            )
+
+            info.spec_accept_token_num = legacy.accepted or 0
+            info.spec_draft_token_num = legacy.proposed or 0
+            info.spec_verify_ct = legacy.verify or 0
+            info.completion_token_num = legacy.completion or 0
+
+            if data.get("counts") is not None:
+                info.counts = SpeculativeCounts.from_dict(data["counts"])
+
+            info.legacy_counts = bool(data.get("legacy_counts", "counts" not in data))
             return info
 
     spec_info: SpecInfo = field(default_factory=SpecInfo)
