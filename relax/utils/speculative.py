@@ -83,3 +83,32 @@ class SpeculativeCounts:
             return cls()
 
         return cls(**{name: _counter(data.get(name)) for name in _COUNTER_NAMES})
+
+
+@dataclass(frozen=True)
+class SpeculativeGeneration:
+    """A committed request, distinct from its content-addressed Forest
+    state."""
+
+    session_id: str
+    generation_id: str
+    state_hash: str
+    counts: SpeculativeCounts
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "session_id": self.session_id,
+            "generation_id": self.generation_id,
+            "state_hash": self.state_hash,
+            "counts": self.counts.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "SpeculativeGeneration | None":
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return None
+        identity = [data.get(name) for name in ("session_id", "generation_id", "state_hash")]
+        if not all(isinstance(value, str) and value for value in identity):
+            return None
+        return cls(*identity, counts=SpeculativeCounts.from_dict(data.get("counts")))

@@ -68,6 +68,7 @@ from relax.agentic.session.state import (
     normalize_tools,
 )
 from relax.utils.logging_utils import get_logger
+from relax.utils.speculative import SpeculativeCounts
 from relax.utils.types import get_spec_token_counts
 
 
@@ -1639,6 +1640,9 @@ class AgenticSessionShard:
 
     @staticmethod
     def _accumulate_request_meta(request, *, meta_info: dict[str, Any]) -> None:
+        counts = SpeculativeCounts.from_meta_info(meta_info)
+        previous = request.pending_spec_counts
+        request.pending_spec_counts = counts if previous is None else previous.plus(counts)
         weight_version = meta_info.get("weight_version")
         if weight_version is not None:
             request.pending_weight_version_delta.append(str(weight_version))
@@ -2610,6 +2614,7 @@ class AgenticSessionShard:
             abort_count=ir.abort_count,
             messages_delta=response_messages,
             token_delta=ir.pending_token_delta,
+            spec_counts=ir.pending_spec_counts,
             logprob_delta=ir.pending_logprob_delta,
             weight_version_delta=ir.pending_weight_version_delta,
             spec_delta=ir.pending_spec_delta,
