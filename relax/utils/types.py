@@ -1,5 +1,6 @@
 # Copyright (c) 2026 Relax Authors. All Rights Reserved.
 
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -167,6 +168,7 @@ class Sample:
             return info
 
     spec_info: SpecInfo = field(default_factory=SpecInfo)
+    spec_generations: list[dict[str, Any]] | None = None
 
     @dataclass
     class PrefixCacheInfo:
@@ -201,6 +203,7 @@ class Sample:
         value = self.__dict__.copy()
         value["status"] = self.status.value
         value["spec_info"] = self.spec_info.to_dict()
+        value["spec_generation"] = copy.deepcopy(self.spec_generations)
         value["prefix_cache_info"] = self.prefix_cache_info.to_dict()
         return value
 
@@ -209,6 +212,7 @@ class Sample:
         data = dict(data)
         data["status"] = Sample.Status(data["status"])
         data["spec_info"] = Sample.SpecInfo.from_dict(data.get("spec_info", {}))
+        data["spec_generations"] = copy.deepcopy(data.get("spec_generations"))
         data["prefix_cache_info"] = Sample.PrefixCacheInfo.from_dict(data.get("prefix_cache_info", {}))
 
         field_names = set(Sample.__dataclass_fields__.keys())

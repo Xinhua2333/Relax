@@ -727,6 +727,8 @@ class SessionForest:
         multimodal_train_inputs_buffer: list[dict[str, Any]] = []
         weight_versions: list[str] = []
         spec_info = dict(_EMPTY_SPEC_DELTA)
+        spec_generations: list[dict[str, Any]] = []
+        generation_identity_complete = True
         prefix_cache_info = dict(_EMPTY_PREFIX_CACHE_DELTA)
         wall_elapsed_s = 0.0
         generation_elapsed_s = 0.0
@@ -741,6 +743,11 @@ class SessionForest:
             if node.multimodal_train_inputs_delta is not None:
                 multimodal_train_inputs_buffer.append(node.multimodal_train_inputs_delta)
             if node.kind == "resp":
+                generation_ids = self.generation_ids_by_state.get(node.state_hash, [])
+                if not generation_ids or node.state_hash in self.untracked_generation_states:
+                    generation_identity_complete = False
+                spec_generations.extend(self.committed_generations[key].to_dict() for key in generation_ids)
+
                 if first_response_node is None:
                     first_response_node = node
                 turns.append(self._agentic_trace_turn_from_node(node, len(turns)))
@@ -813,5 +820,6 @@ class SessionForest:
             non_generation_time=wall_elapsed_s - generation_elapsed_s,
         )
         sample.spec_info = Sample.SpecInfo.from_dict(spec_info)
+        sample.spec_generations = spec_generations if generation_identity_complete else None
         sample.prefix_cache_info = Sample.PrefixCacheInfo.from_dict(prefix_cache_info)
         return sample
