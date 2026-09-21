@@ -87,3 +87,116 @@ def compute_speculative_metrics(samples: Iterable[Any]) -> dict[str, int | float
     if ordinary_counts:
         metrics.update(_counter_metrics(ordinary_counts, len(ordinary_counts), "spec/sample/"))
     return metrics
+
+
+def _sample_counts(sample: Any) -> SpeculativeCounts | None:
+    """Compatibility cohort for the deprecated arithmetic sample averages."""
+    records = getattr(sample, "spec_generations", None)
+
+    if records is None:
+        if "agentic_trace" in (getattr(sample, "metadata", None) or {}):
+            return None
+        return getattr(getattr(sample, "spec_info", None), "counts", None)
+
+    if not isinstance(records, list) or not records:
+        return None
+
+    unique: dict[tuple[str, str], SpeculativeGeneration] = {}
+
+    for raw_record in records:
+        record = SpeculativeGeneration.from_dict(raw_record)
+        session_id = getattr(sample, "session_id", None)
+
+        if record is None or (session_id is not None and session_id != record.session_id):
+            return None
+
+        key = (record.session_id, record.generation_id)
+
+        if key in unique and unique[key] != record:
+            return None
+
+        unique[key] = record
+
+    total = SpeculativeCounts(0, 0, 0, 0)
+
+    for record in unique.values():
+        total = total.plus(record.counts)
+
+    return total
+
+
+def compute_speculative_log_metrics(
+    samples: list[Any],
+    *,
+    enabled: bool = False,
+) -> dict[str, int | float]:
+    """Return existing-log keys without requiring a configured global
+    engine."""
+    sample_counts = [_sample_counts(sample) for sample in samples]
+
+    has_data = any(
+        getattr(sample, "spec_generations", None) is not None
+        or "agentic_trace" in (getattr(sample, "metadata", None) or {})
+        for sample in samples
+    )
+
+    has_data |= any(
+        counts is not None
+        and any(
+            value is not None
+            for value in (
+                counts.accepted,
+                counts.proposed,
+                counts.verify,
+            )
+        )
+        for counts in sample_counts
+    )
+
+    # Old positive counts can reveal a legacy source even without a global flag.
+    has_data |= any(
+        (
+            getattr(
+                getattr(sample, "spec_info", None),
+                "spec_draft_token_num",
+                0,
+            )
+            or 0
+        )
+        > 0
+        or (
+            getattr(
+                getattr(sample, "spec_info", None),
+                "spec_verify_ct",
+                0,
+            )
+            or 0
+        )
+        > 0
+        for sample in samples
+    )
+
+    if not enabled and not has_data:
+        return {}
+
+    metrics = compute_speculative_metrics(samples)
+
+    if not samples or metrics["spec/conflicting_generation_count"] or metrics["spec/invalid_record_count"]:
+        return metrics
+
+    for numerator, denominator, key in (
+        ("accepted", "proposed", "spec_accept_rate"),
+        ("completion", "verify", "spec_accept_length"),
+    ):
+        pairs = [
+            (getattr(counts, numerator), getattr(counts, denominator))
+            for counts in sample_counts
+            if counts is not None
+        ]
+
+        if len(pairs) == len(samples) and all(
+            top is not None and bottom is not None and bottom > 0 for top, bottom in pairs
+        ):
+            metrics[key] = sum(top / bottom for top, bottom in pairs) / len(pairs)
+
+    return metrics

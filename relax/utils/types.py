@@ -238,9 +238,7 @@ class Sample:
 
         And extract
         """
-        if args.sglang_speculative_algorithm:
-            # cannot directly use spec info from sglang because of partial rollout.
-            self.spec_info.add(meta_info=meta_info)
+        self.spec_info.add(meta_info=meta_info)
 
         # Collect prefix cache statistics
         self.prefix_cache_info.add(meta_info=meta_info)
