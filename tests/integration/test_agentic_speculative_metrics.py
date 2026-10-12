@@ -147,6 +147,8 @@ def rollout_logger(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         setattr(constants, name, name)
     engine = ModuleType("relax.backends.sglang.sglang_engine")
     engine.SGLangEngine = type("UnusedEngine", (), {})
+    engine.RouterWorkerCleanup = type("UnusedRouterWorkerCleanup", (), {})
+    engine.remove_dead_router_worker = Mock(side_effect=AssertionError("Router cleanup is outside logging tests"))
     tracking = ModuleType("relax.utils.tracking_utils")
     tracking.log = Mock()
     tracking.flush_metrics = Mock()
